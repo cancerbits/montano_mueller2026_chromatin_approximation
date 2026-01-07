@@ -1,0 +1,48 @@
+---
+title: "rstudio theme"
+output: html_document
+date: '2025-10-30'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r rtheme}
+
+https://github.com/wvictor14/rstudio_themes
+# create temporary download directory
+theme_49th_parallel <- fs::path_temp("49th_parallel-RStudio", 
+                                     ext = "rstheme")
+theme_asher <- fs::path_temp("asher-RStudio", 
+                                     ext = "rstheme")
+  
+  https://github.com/michaelasher/CustomRStudioTheme/tree/master/RStudioStyleFiles/asher.rstheme
+# download theme from github
+download.file( "https://github.com/michaelasher/CustomRStudioTheme/tree/master/RStudioStyleFiles/asher.rstheme", 
+              theme_asher)
+
+download.file("https://raw.githubusercontent.com/wvictor14/rstudio_themes/master/49th%20Parallel.rstheme", 
+              theme_49th_parallel)
+
+
+# apply the theme
+rstudioapi::addTheme(theme_49th_parallel, 
+                     apply = TRUE)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

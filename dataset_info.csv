@@ -1,0 +1,4 @@
+dataset_name,dataset_paths_nfcore,dataset_paths_metadata,dataset_paths_counts_ref,path_to_self_counts_self,dataset_type,frip.threshold,cell_group_vars,metadata_sample_name_col
+dataset1,/path/to/nfcore1,/path/to/metadata1.csv,/path/to/ref_counts1.tsv,/path/to/self_counts1.tsv,reference,0.05,celltype,Experiment
+dataset2,/path/to/nfcore2,/path/to/metadata2.csv,/path/to/ref_counts2.tsv,/path/to/self_counts2.tsv,protocol,0.05,celltype,Experiment
+dataset3,/path/to/nfcore3,/path/to/metadata3.csv,/path/to/ref_counts3.tsv,/path/to/self_counts3.tsv,external,0.05,celltype,Experiment

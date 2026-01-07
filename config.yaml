@@ -1,0 +1,210 @@
+############################################
+#     ML2CELL PARAMETERS
+############################################
+#   Please go through this file and make sure to adjust all *REQUIRED* paths and parameters 
+#   to your system and data
+
+############################################
+#DOCKER CONTAINER PARAMETERS
+############################################
+
+project_name: ML2CellUpdated
+project_docker: cancerbits/dockr:ML2CellR
+max_cpus: 20
+
+###########################################
+# PATHS TO READ DATA AND EXPORT OUTPUTS
+###########################################
+
+# *REQUIRED* TRUE PATHS IN YOUR SERVER TO READ DATA OR EXPORT OUTPUTS
+
+project_root_host: /path/to/ml2cell_code
+data_root_host: /path/to/data/ml2cell
+out_root_host: /path/to/out/ml2cell
+metadata_root_host: /path/to/metadata/ml2cell
+resources_root_host: /path/to/resources
+
+# *DO NOT MODIFY* DESTINATION PATHS INSIDE THE CONTAINER.
+# inside the container you will use the paths below to address the locations above.
+
+project_root: /home/rstudio
+out_root: /home/rstudio/mnt_ou
+data_root: /home/rstudio/mnt_data
+resources_root: /home/rstudio/mnt_resources
+
+# *OPTIONAL* DESTINATION PATH OF ALL PLOTS
+plotpath: /home/rstudio/mnt_out/plots/
+
+#############################################
+# *OBSOLETE* GENOME CONFIG:
+#############################################
+genome: cellranger_data/refdata-gex-GRCh38-2020-A
+genome_chromatin: cellranger_data/refdata-cellranger-atac-GRCh38-1.2.0
+genome_build: hg38
+
+#############################################
+# *REQUIRED* ANALYIS PARAMETERS
+#############################################
+
+# *REQUIRED*  analysis version: change this id to start the analysis from scratch or reload results with previous id
+
+analysis.version: 20250818.broad
+
+# *REQUIRED* download a genome annotation file and make sure the path is correct here
+gtfpath: ~/ml2cell_code/metadata/gencode.v44.annotation.gtf.gz
+
+##############################################################################################
+# *REQUIRED* METADATA CONFIG
+#  PLEASE DESCRIBE YOIUR SAMPLES SO ML2CELL CAN USE THE INFO IN THE ANALYSIS.
+##############################################################################################
+
+# *DO NOT MODIFY*
+
+# *REQUIRED* reagents.- indicates all the columns associated with treatments. 
+#INSTRUCTIONS
+#The reagents variable indicates metadata column names that describe each treatment. 
+#These column names are comma-separated, no spaces. 
+
+#Please prepare the columns following the example below:
+#EXAMPLE: 2 out of 4 samples received glucose at round 1, and the other 2 received glucose at round 2, one of each 1x and the other 2x
+# when a sample did not receive the treatment, we add 0. If left undescribed, the sample automatically will receive NA
+
+#EXAMPLE SOLUTION: samplesheet should describe 2 "reagents" glucose.1 and glucose.2
+#sample sheet
+#Experiment   glucose.1 glucose.2
+#s1           1         0
+#s2           2         0
+#s3           0         1
+#s4           0         2
+
+reagents: glucose.1,glucose.2
+
+# *REQUIRED FOR PLOTS* annotvars.- the order of the variables in which to organise and order the heatpap columns
+annotvars: epo.1,epo.2,hydrocortisone.1,hydrocortisone.2,insulin.heparin.1,insulin.heparin.2,rbc.round1,il4.1,il4.2,tgfbeta.1,tgfbeta.2
+
+#*OPTONAL*  an ordered subset of celltypes in the reference to study (the order will used for plotting too)
+selected_celltype_list: NULL
+
+cell_type_variable: celltype
+target_cell_type: Ery
+exclude_cell_type: Blast,LSC,pHSC
+treatment_id_cols: rbc.round1,rbc.round2,rbc.combo,tmnt1,tmnt2,tmnt.full
+exclude: RBC-step-2--6D-r1,RBC-step-2--7D-r1,RBC-step-2--8D-r1
+peak_width: broad_peak
+
+#*OPTIONAL* if you want to study only the test experiments during analysis indicate T
+onlytest: F
+
+### replicate string- a pattern that symbolise a replicate in the experiment names. for example, if replicates have symbols expt-r1, expt-r2, expt-r3, then the pattern is -r[0-9].  HINT: the string is removed in the bam and bigwig file names inside merge_replicate
+
+replicate.string: -r[0-9]
+
+# QC AND ANALYSIS PARAM CONFIG
+
+randomseed: 42
+
+# *DECISION REQUIRED* keep peaks with at least min.reads in at least min.expts? Y= filter.peaks: T
+filter.peaks: F
+min.expts: 6
+min.reads: 5
+
+filter.frip: T
+
+# *DO NOT MODIFY HERE, taken from dataset_info.csv* 
+
+# *DEFAULTS RECOMMENDED. MODIFY AT YOUR OWN RISK* RANDOM FOREST CONFIG
+
+randomforest_ntrees: 500 
+randomforest_initial_components: 100
+
+# *FIRST TRY DEFAULT, THEN ADJUST TO IMPROVE CLASSIFICATION ERROR* strict+ >=2, lenient= any value >1
+randomforest_gini_threshold: 2
+
+# *REQUIRED* datasets to evaluate 
+randomforest_test_datasets: Seruggia2024-1,Seruggia2024-2,Seruggia2025-3
+
+##################################################################################
+#*REQUIRED* GSEA CONFIG
+##################################################################################
+
+# *REQUIRED* term(s) help find gene sets related to the target cell of interest. 
+# single string: use a root word such as erythro. append multiple alternatives with pipe "|" eg. "erythroc|erythrob"
+gsea_celltype_searchterm: erythroc|erythrob|erythroi
+
+# *REQUIRED* terms to exclude from the search
+gsea_celltype_exclude: mouse
+
+# *DO NOT MODIFY* Internal formatting of the bars
+gsea_plot_params_hyper: spaced4
+
+# *ADAPT AFTER FIRST RUN* 
+gsea_total_print_length: 80
+
+#PEAK SENSITIVITY ANALYSIS
+
+peak_sensitivity_threshold: 0.85
+
+## MISC PARAMETERS NEEDED IN OTHER SECTIONS (some may be not needed anymore)
+
+vst_name: vst
+################################################################################
+# pca projection parameters
+################################################################################
+
+n_top_var: Inf
+numcomp: 6
+alph: 0.99
+
+################################################################################
+#atac analysis parameters
+################################################################################
+
+MAX_DIST_GENE: 250000
+GENELIST_MIN_GENES: 3
+GENE_ASSOC_SIGCOR_THRESH: 0.05
+NUMTOPLOADINGS: 100000
+NUMBGSAMPLES: 10000
+
+
+################################################################################
+#TFBS parameters
+################################################################################
+
+z.thresh: 3 #threshold for the z score vs empirical background distirbution
+pct.thresh: 0.90 #threshold of percentile of frequency in the empirical background distribution
+
+################################################################################
+# fgsea parameters
+################################################################################
+
+numtop.fgsea: 100000
+
+################################################################################
+#high signal peak parameters
+################################################################################
+
+auc.thresh: .95
+max.peaks.pull: 8000
+
+
+################################################################################
+# supporting variables
+################################################################################
+
+rangefields: Geneid,Chr,Start,End,Strand,Length
+
+################################################################################
+# *DO NOT MODIFY HERE* Dataset INFORMATION
+# PLEASE COMPLETE THE dataset_info.csv table. See example on dataset_info_example.csv
+# variables from table dataset_info.csv will be automatically appended below 
+################################################################################
+
+dataset_name: Corces2016,Seruggia2024-1,Seruggia2024-2,Ludwig2019,Seruggia2025-3,Ramirez2017,Zimmermannova2023,Li2020
+dataset_paths_nfcore: ~/mnt_out/atacseq_corces2016_reference_broadpeak/,~/mnt_out/seruggia2024-1_atac_biodirt_yespeak/,~/mnt_out/atacseq_seruggia20242_bob_try2/,~/mnt_out/atacseq_ludwig2019/,~/mnt_out/atacseq_seruggia2025_03_biodirt_broadpeak/,~/mnt_out/atacseq_ramirez2017_run2/,~/mnt_out/atacseq_zimmermannova2023/,~/mnt_out/atacseq_li2020/
+dataset_paths_metadata: ~/ml2cell_code/metadata/metadata_srarunselector_corces_annotated.csv,~/ml2cell_code/metadata/samplesheet2024-1_annotation_treatment.csv,~/ml2cell_code/metadata/samplesheet_seruggia_2024_2_conditions_annotated.csv,~/ml2cell_code/metadata/metadata_ludwig2019.csv,~/ml2cell_code/metadata/samplesheet_seruggia_2025_03_annotated.csv,~/mnt_out/fetchngs_ramirez2017/samplesheet/samplesheet_atacseq_external.csv,~/mnt_out/fetchngs_zimmermannova2023/samplesheet/samplesheet_atacseq_external.csv,~/mnt_out/CRAdata_li2020/samplesheet_atacseq_external.csv
+dataset_paths_counts_ref: NA,NA,NA,NA,NA,NA,NA,NA
+dataset_paths_counts_self: NA,NA,NA,NA,NA,NA,NA,NA
+dataset_type: reference,test,test,external,test,external,external,external
+frip_threshold: 0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05
+cell_group_vars: celltype,condition,condition,Population,treatment,sample,condition,sample
+metadata_sample_name_col: Experiment,Experiment,Experiment,Experiment,Experiment,sample,sample,Experiment

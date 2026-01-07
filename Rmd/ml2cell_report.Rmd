@@ -1,0 +1,50 @@
+---
+title: "ML2Cell report"
+output:
+  pdf_document: default
+  html_document: default
+date: '2025-06-24'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set( root.dir=setwd(dirname(rstudioapi::getActiveDocumentContext()$path)))
+
+```
+
+prepare folders and paths
+
+```{r}
+
+prep.knit.path= function(x) gsub("/home/rstudio/mnt_out/plots", "images", x)
+
+
+if (!dir.exists("images")) dir.create("images")
+
+image.paths=list(
+  one="/home/rstudio/mnt_out/plots/2025-06-25_simplebars.pdf",
+  two="/home/rstudio/mnt_out/plots/2025-06-25_transferplot_DE_among_conditions_validation.pdf",
+  three="/home/rstudio/mnt_out/plots/2025-06-17_heatmap_read_deeptools_masked1.pdf",
+  four="/home/rstudio/mnt_out/plots/2025-06-25_density_vsd_concordance.pdf",
+  five="/home/rstudio/mnt_out/plots/2025-06-22_heatmap_vsd_concordance_validation_filtered_openthresh_3.5.pdf",
+  six="/home/rstudio/mnt_out/plots/2025-06-22_barplot_openpeaks_concordance_vsd_thresh_3.5.pdf",
+seven="/home/rstudio/mnt_out/plots/2025-06-20_heatmap_pctiles_concordance_validation_filtered_thresh_0.5_seriatedforward.pdf"
+)
+
+lapply(image.paths, function(x){
+  file.copy(from = x, to = prep.knit.path(x))
+  
+})
+
+```
+
+## 1. Plot template
+
+
+```{r echo=FALSE, out.width="100%", out.height=500 }
+
+knitr::include_graphics(prep.knit.path(image.paths[[1]]), )
+
+
+```
+

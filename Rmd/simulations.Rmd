@@ -1,0 +1,583 @@
+---
+title: "simulations"
+output: html_document
+date: '2025-08-01'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# SETUP. Import libraries and functions
+
+```{r echo=FALSE}
+source("~/ml2cell_code/R/mlutils_setup.R")
+
+config <- yaml::read_yaml(file = '~/ml2cell_code/config.yaml')
+
+## switch to separate plotting dir
+config$plotpath <- file.path(config$plotpath, "simulations/")
+dir.create(config$plotpath, recursive = TRUE)
+
+## transform config variables into vectors based on comma separation  
+dataset.info=config.to.vectors(config)
+
+# things that didn't work / were undeclared:
+#test.datasets=dataset.info$dataset_name[dataset.info$is_test %>% as.logical]
+#"vst_name" ?
+#analysis.version= "20250506.broad"    --- counts cache is empty, pca cache doesn't exist
+
+# define manually:
+test.datasets="Seruggia2024-2"
+ref.datasets="Corces2016" # this doesn't seem to be defined in the config?
+vst_name <- "vst"
+
+
+#while transitioning to full config dependency, we import many variables into the workspace
+list2env(dataset.info, .GlobalEnv)
+
+
+
+source("~/ml2cell_code/R/nanorf_utils.R")
+source("~/ml2cell_code/R/atacutils.R")
+source("~/ml2cell_code/R/utilities.R")
+```
+
+load caches:
+
+```{r}
+analysis.version <- "20250407.broad" # this doesn't work for metadata though
+#metadata.version <- "20250810.broad"  # instead of loading the metadata from a separate cache, just extract it from the "PCA data" --> stay in consistent version
+
+#simpleCache(paste_("formatted.metadata_version", metadata.version), assignToVar="meta2", reload=T)
+
+simpleCache(paste_("pca.data_PCA_distance_calculation_version", analysis.version), assignToVar="ref.pca.data", reload=T)
+meta2 <- ref.pca.data[, - grep("^PC|dist", colnames(ref.pca.data))]
+simpleCache(paste_("counts_filter", filter.peaks, ifelse(filter.frip, "filtered_fripscore", "raw_unfiltered_fripscore"), "_minexpts", min.expts, "minreads",min.reads, "analysisversion", analysis.version), assignToVar="filterdata" , reload=T) 
+
+list2env(filterdata, .GlobalEnv)
+gc()
+
+testids= meta2 %>% filter(dsname%in%test.datasets) %>% pull(Experiment)
+refids= meta2 %>% filter(dsname%in%ref.datasets) %>% pull(Experiment)
+
+# filter the datasets once to save time and space:
+meta2 <- meta2[c(refids, testids), ]
+counts.filtered <- counts.filtered[, c(refids, testids)]
+
+#annotation.peaks=all.raw.datasets.list[[1]]$annotation.peaks.ref
+
+```
+```{r}
+print(head(meta2))
+
+median.seq.depth= with(as.data.table(meta2)[,.(mean_seq_depth=median(`1st_fragments`)), by=dsname], structure(mean_seq_depth, names=dsname))
+
+```
+
+
+# Functions for standard workflow from normalization to PCA distances
+
+```{r}
+
+projectsamples = function(dds, metadata, ref.ids=NULL, test.ids=NULL, assay="vst", n.top.var=Inf, label=NULL, return.reference=T, vst.name="vst"){
+  #fcat("generating pca...")  
+  pca.list <- plotPCA_vst(dds, ids=ref.ids, metadata=metadata[ref.ids, ], assay=vst.name, ntop=n.top.var)
+  refpca.df<-pca.list[[1]] 
+  refpca.obj<-pca.list[[2]]
+  #fcat("running pca projection...")
+  #project samples onto the PCA
+  projected.df= scale(assay(dds[, test.ids], vst.name) %>% t, refpca.obj$center, refpca.obj$scale) %*% refpca.obj$rotation
+  
+  #combine test and reference dataset
+  #fcat("binding projection results...")
+  projected.df<- cbind(metadata[test.ids, ], projected.df[test.ids, ] )
+  if(return.reference){
+    pca.data<- bind_rows(refpca.df, projected.df)
+  }else{
+    pca.data=projected.df
+  }
+  
+  if(!is.null(label)){
+    pca.data[test.ids, "celltype"]=label
+  }
+  
+  pca.data
+}
+
+project.test.on.ref.pca = function(dds, metadata, test.datasets, ref.ids, vst.name) {
+  pca.data=lapply(test.datasets, function(x){
+    #fcat(x)
+    
+    test.ids=colnames(dds)[colData(dds)$dsname==x] # FH: get IDs from dds object instead of all.raw.datasets.list --> less dependencies
+    #print(test.ids)
+    
+    pj=projectsamples(dds, metadata, ref.ids=ref.ids, test.ids=test.ids, label=x, return.reference=ifelse(x==test.datasets[1], T, F), vst.name=vst.name)
+  
+  }) %>% bind_rows
+    
+  return(pca.data)
+}
+
+rf.select.informative = function(pca.data, ref.ids, all.colors, config, fix.seed=config$randomseed){
+  
+  if(!is.null(fix.seed)) set.seed(fix.seed)
+  
+  test.datasets=config$dataset_name[as.logical(config$is_protocol)]
+  gini.threshold=config$randomforest_gini_threshold
+  generic.pc.list=paste0("PC", 1:length(ref.ids))
+  
+  # Train the Random Forest classifier
+  traininglevels=intersect(names(all.colors[[config$cell_type_variable]]), unique(pca.data[ref.ids,config$cell_type_variable ]))   
+  #fcat(traininglevels)
+  
+  rf_model <- randomForest(x = pca.data[ref.ids, generic.pc.list], y = factor(pca.data[ref.ids, config$cell_type_variable], levels=traininglevels ), ntree = config$randomforest_ntrees)
+  
+  # Print the trained model
+  #print(rf_model)
+
+  # Get variable importance
+  var_importance <- importance(rf_model)
+  
+  # Print variable importance
+  #print(var_importance)
+  
+  # Selecting PCs based on their Mean decrease Gini
+  var.importance.arranged=var_importance %>% as.data.frame %>% arrange(-MeanDecreaseGini)
+  informative.pcs=rownames(var.importance.arranged)[var.importance.arranged>=gini.threshold]
+  
+  return(informative.pcs)
+}
+
+calculate.pca.distances <- function(pc.matrix, target.indices) {
+  # mean of all target coordinates in PCA:
+  target.centroid = colMeans(pc.matrix[target.indices,])
+  
+  # compare each row in the PCA matrix to target:
+  apply(pc.matrix, 1, function(cur.row){
+    dist(rbind(cur.row, target.centroid), method="euclidean") %>% as.numeric
+  })
+}
+
+rblapply <- function(args, fun, id="id", ..., cores=1) {
+  require(data.table)
+  if(cores>1) {
+    require(parallel)
+    res <- parallel::mclapply(X=args, FUN=fun, ..., mc.cores=cores)
+    names(res) <- names(args)
+    res <- rbindlist(res, idcol=id, fill=T)
+    res[,paste(id):=args[get(id)]] # args have been converted to numbers --> convert them back			
+  } else {
+    res <- rbindlist(sapply(X=args, FUN=fun, simplify=FALSE, ...), idcol=id, fill=T)
+  }
+  return(res)
+} 
+
+
+sample.count.matrix <- function(counts, ref.ratio, test.ratio, ref.ids, test.ids, min.counts=1000, keep.top.perc=0.1) {
+  sample.fun <- function(cnts, ratio) {
+    apply(cnts, 2, function(x) {
+      
+      y <- rep(0, length(x))
+      total.n <- sum(x)
+      sampled.n <- round(total.n * ratio)
+      
+      expanded.counts <- rep(1:length(x), times=x)
+      sampled.counts <- sort(sample(x=expanded.counts, size=sampled.n))
+      rle.counts <- rle(sampled.counts)
+      
+      y[rle.counts$values] <- rle.counts$lengths
+      
+      return(y)
+    })
+  }
+  
+  counts.sampled = cbind(
+    sample.fun(counts[,ref.ids], ref.ratio), 
+    sample.fun(counts[,test.ids], test.ratio)
+  )
+  
+  rownames(counts.sampled) <- rownames(counts)
+  
+  sub.thresh.i = colSums(counts.sampled)<min.counts
+  sub.thresh.j = rowSums(counts.sampled)==0
+  #fcat(sprintf("%d column counts below threshold (< %d), %d rows removed (all zero)", sum(sub.thresh.i), min.counts, sum(sub.thresh.j)))
+  
+  counts.sampled <- counts.sampled[!sub.thresh.j,!sub.thresh.i]
+  
+  if(keep.top.perc < 1) {
+    # keep only the top-X% most variable peaks to speed things up:
+    counts.vars <- apply(counts.sampled, 1, var)
+    counts.sampled <- counts.sampled[counts.vars>=quantile(counts.vars, 1-keep.top.perc),]
+  }
+  
+  return(counts.sampled)
+}
+
+#counts.filtered <- counts.filtered[1:100000,] # debug
+
+#counts.filtered.test <- matrix(1:100, nrow=10)
+#rownames(counts.filtered.test) <- paste0("r", 1:nrow(counts.filtered.test))
+#colnames(counts.filtered.test) <- paste0("c", 1:ncol(counts.filtered.test))
+#refids <- colnames(counts.filtered.test)[1:4]
+#testids <- setdiff(colnames(counts.filtered.test), refids)
+#print(colSums(counts.filtered.test))
+#
+#counts.sampled = sample.count.matrix(counts.filtered.test, ref.ratio=1, test.ratio=0.5, ref.ids=refids, test.ids=testids, keep.top.perc=keep.perc, min.counts=0)#
+#
+#print(counts.filtered.test)
+#print(colSums(counts.filtered.test))
+#print(counts.sampled)
+#print(colSums(counts.sampled))
+#
+#all.equal(counts.filtered.test, counts.sampled)
+
+make.dds <- function(counts, metadata, vst.name) {
+
+  dds <- DESeqDataSetFromMatrix(countData=counts, colData=metadata %>% dplyr::mutate(dsname=factor(dsname)), design=~dsname+1) #olData=metadata, design=~1) # 
+  
+  # for small count tables estimateSizeFactors(..) doesn't work,
+  # so we switch to the other method for all simulations:
+  # (at full size, the differences are minimal)
+  #
+  #dds     <- estimateSizeFactors(dds)
+  #Error in estimateDispersionsFit(object, quiet = TRUE, fitType) : 
+  #  all gene-wise dispersion estimates are within 2 orders of magnitude
+  #  from the minimum value, and so the standard curve fitting techniques will not work.
+  #  One can instead use the gene-wise estimates as final estimates:
+  #  dds <- estimateDispersionsGeneEst(dds)
+  #  dispersions(dds) <- mcols(dds)$dispGeneEst
+  #  ...then continue with testing using nbinomWaldTest or nbinomLRT
+  
+  dds <- estimateSizeFactors(dds)
+  #rld <- varianceStabilizingTransformation(dds, blind=FALSE, fitType="local")
+  rld <- vst(dds, blind = FALSE) #, fitType = "local"
+  assay(dds, vst.name) <- assay(rld)
+  
+  #dds <- estimateDispersionsGeneEst(dds)
+  #dispersions(dds) <- mcols(dds)$dispGeneEst
+  #dds <- estimateDispersionsFit(dds, quiet = TRUE, "local")
+  #rld <- varianceStabilizingTransformation(dds, blind=F, fitType="local")
+  
+  #col.sums <- colSums(counts)
+  #sizeFactors(dds) <- col.sums / max(col.sums)
+  #rld <- counts(dds, normalized = FALSE, replaced = FALSE)
+  #assay(dds, vst.name) <- rld
+  
+  dds
+}
+
+run.all <- function(counts, metadata, ref.ids, test.datasets, all.colors, config, vst.name="vst") {
+
+  # normalized data
+  dds=make.dds(counts, metadata=metadata, vst.name=vst.name)
+  
+  # execute PCA and project test samples onto PCA
+  pca.data = project.test.on.ref.pca( dds, metadata=metadata, test.datasets, ref.ids=ref.ids, vst.name=vst.name)
+  
+  # use Random forest to classify cell types and recover variable importance, and what PCs are relevant for classifying all cell types
+  informative.pcs = rf.select.informative(pca.data=pca.data, ref.ids=ref.ids, all.colors=all.colors, config=config, fix.seed = NULL)
+  
+  # Calculate distances to target based on PCA
+  dists.centroid.pca = calculate.pca.distances(pca.data[,informative.pcs], target.indices=pca.data$celltype==config$target_cell_type)
+  
+  return(dists.centroid.pca)
+}
+
+dim#counts.filtered <- counts.filtered[1:100000,] # debug
+
+set.seed(config$randomseed) # set it once at the beginning of the sampling instead of each call to the RF function
+n.trials <- 250 #250 #0
+#sample.steps.ref <- c(0.01, 0.1, 0.25, 0.5, 1) #c(1/64, 1/4, 1/2, 1) #c(1/32, 1/16, 1/8, 1/4, 1/2, 1) #seq(0.1, 1, by=0.1)
+#sample.steps.test <- c(0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 1) #c(1/64, 1/32, 1/16, 1/8, 1/4, 1/2, 3/4, 9/10, 1) # c(1/32, 1/16, 1/8, 1/4, 1/2, 1) #seq(0.1, 1, by=0.1) # c(0.1) #
+
+sample.steps.ref <- c(1, 10, 20) * 1000000 / median.seq.depth[ref.datasets]
+sample.steps.test <- c(0.5, 1, 5, 10, 15, 20, 25) * 1000000 / median.seq.depth[test.datasets]
+
+
+
+keep.perc <- 1
+simulation.cache.dir <- file.path(config$plotpath, paste0("cache_vst_keep", keep.perc))
+dir.create(simulation.cache.dir)
+
+
+
+
+sample.steps.fac.ref.short <- scales::number(sample.steps.ref * median.seq.depth[ref.datasets], scale_cut = scales::cut_long_scale()) # sprintf("%.0f%%", sample.steps.ref*100)
+sample.steps.fac.test.short <- scales::number(sample.steps.test * median.seq.depth[test.datasets], scale_cut = scales::cut_long_scale()) # sprintf("%.0f%%", sample.steps.test*100)
+sample.steps.fac.ref <- sprintf("Ref: ~%s reads (%.0f%%)", scales::number(sample.steps.ref * median.seq.depth[ref.datasets], scale_cut = scales::cut_long_scale()), sample.steps.ref*100)
+sample.steps.fac.test <- sprintf("Test: ~%s reads (%.0f%%)", scales::number(sample.steps.test * median.seq.depth[test.datasets], scale_cut = scales::cut_long_scale()), sample.steps.test*100)
+
+
+print(sample.steps.fac.ref)
+print(sample.steps.fac.test)
+
+
+#trial.i <- 1
+#sample.ratio.ref <- sample.steps.ref[4]
+#sample.ratio.test <- sample.steps.ref[4]
+
+```
+
+```{r}
+rblapply <- function(args, fun, id="id", ..., cores=1) {
+  require(data.table)
+  #if(cores>1) {
+    require(parallel)
+    res <- parallel::mclapply(X=args, FUN=fun, ..., mc.cores=cores)
+    names(res) <- names(args)
+    res <- rbindlist(res, idcol=id, fill=T)
+    res[,paste(id):=args[get(id)]] # args have been converted to numbers --> convert them back			
+  #} else {
+  #  res <- rbindlist(sapply(X=args, FUN=fun, simplify=FALSE, ...), idcol=id, fill=T)
+  #}
+  return(res)
+}
+
+
+dists.centroid.pca.all <- rblapply(1:n.trials, function(trial.i) {
+  fcat(sprintf("------------------------ TRIAL %d ------------------------", trial.i))
+  print(Sys.time())
+  res <- rblapply(sample.steps.ref, function(sample.ratio.ref) {
+    res <- rblapply(sample.steps.test, function(sample.ratio.test) {
+      simpleCache(paste_("simulation.trial", analysis.version, sample.ratio.ref, sample.ratio.test, trial.i, "top", keep.perc), {
+        fcat(sprintf("trial.i = %d, sample.ratio.ref = %.2f, sample.ratio.test = %.2f -- start (ncol = %d, nrow = %d)", trial.i, sample.ratio.ref, sample.ratio.test, ncol(counts.filtered), nrow(counts.filtered)))
+        tryCatch({
+          counts.sampled = sample.count.matrix(counts.filtered, ref.ratio=sample.ratio.ref, test.ratio=sample.ratio.test, ref.ids=refids, test.ids=testids, keep.top.perc=keep.perc)
+          fcat(sprintf("trial.i = %d, sample.ratio.ref = %.2f, sample.ratio.test = %.2f -- sampled (ncol = %d, nrow = %d)", trial.i, sample.ratio.ref, sample.ratio.test, ncol(counts.sampled), nrow(counts.sampled)))
+          dists.centroid.pca = run.all(counts=counts.sampled, metadata=meta2, ref.ids=refids, test.datasets=test.datasets, all.colors=allcolors, config=dataset.info, vst.name=vst_name)
+          fcat(sprintf("-- trial.i = %d, sample.ratio.ref = %.2f, sample.ratio.test = %.2f -- done", trial.i, sample.ratio.ref, sample.ratio.test))
+          return(data.table(sample.name=names(dists.centroid.pca), dist.to.centroid.trial=dists.centroid.pca))
+        }, error=function(e)  {
+          fcat(sprintf("-- trial.i = %d, sample.ratio.ref = %.2f, sample.ratio.test = %.2f -- failed", trial.i, sample.ratio.ref, sample.ratio.test))
+          message(paste0(e))
+          return(data.table(sample.name=c(), dist.to.centroid.trial=c()))
+        })
+      }, assignToVar="res", cacheDir=simulation.cache.dir, recreate=FALSE, reload=TRUE)
+      return(res)
+    }, "sample.ratio.test", cores = length(sample.steps.test))
+    return(res)
+  }, "sample.ratio.ref", cores = length(sample.steps.ref))
+  print(Sys.time())
+  return(res)
+}, "trial.iteration")
+
+
+#------------------------ TRIAL 2 ------------------------ 
+#[1] "2025-08-14 15:47:40 CEST"
+#[1] "2025-08-14 15:53:46 CEST"
+#
+# about 6 min per trials with 4x4 combinations
+
+#pca.data=pca.data %>% dplyr::mutate(rbc.round1=as.integer(extractrbc1(Experiment)), rbc.round2=extractrbc22(Experiment), rbc.combo=extractrbc.combo(Experiment))
+#pca.data=pca.data %>% dplyr::mutate(celltype.original=celltype)
+#pca.data=pca.data %>% dplyr::mutate(celltype=ifelse(dsname=="Seruggia2025-3", "validation", celltype))
+
+```
+
+
+
+```{r}
+
+
+full.pca.trials.data <- cbind(dists.centroid.pca.all, ref.pca.data[dists.centroid.pca.all$sample.name,c("dist.to.centroid.pca","celltype","rbc.round1", "rbc.round2"), drop=FALSE])
+
+full.pca.trials.data[, treatment.round := "Reference"]
+full.pca.trials.data[!is.na(rbc.round2) & rbc.round2!="", treatment.round := "Round 2"]
+full.pca.trials.data[!is.na(rbc.round1) & rbc.round1!="" & treatment.round!="Round 2", treatment.round := "Round 1"]
+
+full.pca.trials.data[, treatment.label := "Reference"]
+full.pca.trials.data[treatment.round=="Round 1", treatment.label := rbc.round1]
+full.pca.trials.data[treatment.round=="Round 2", treatment.label := paste0(rbc.round1,rbc.round2)]
+
+full.pca.trials.data[, sample.ratio.ref.val.short := factor(sample.ratio.ref, levels=sample.steps.ref, labels=sample.steps.fac.ref.short)]
+full.pca.trials.data[, sample.ratio.test.val.short := factor(sample.ratio.test, levels=sample.steps.test, labels=sample.steps.fac.test.short)]
+full.pca.trials.data[, sample.ratio.ref.val := factor(sample.ratio.ref, levels=sample.steps.ref, labels=sample.steps.fac.ref)]
+full.pca.trials.data[, sample.ratio.test.val := factor(sample.ratio.test, levels=sample.steps.test, labels=sample.steps.fac.test)]
+
+full.pca.trials.data <- full.pca.trials.data[treatment.round != "Reference", ]
+
+
+full.pca.trials.data <- full.pca.trials.data[, dist.to.centroid.trial.rescaled:=scale(dist.to.centroid.trial), by=.(treatment.round, sample.ratio.test.val, sample.ratio.ref.val, trial.iteration)]
+
+print(rbind(head(full.pca.trials.data,n=3), tail(full.pca.trials.data,n=3)))
+```
+
+
+```{r}
+
+full.pca.trials.data[, .N, by=.(sample.ratio.ref.val, sample.ratio.test.val)][order(N),]
+
+```
+
+
+```{r, fig.width=12, fig.height=10}
+plot.trials.scatter.full <- ggplot(full.pca.trials.data, aes(x=dist.to.centroid.pca, y=dist.to.centroid.trial.rescaled)) + ggrastr::geom_point_rast(aes(color=treatment.round)) + theme_bw() + facet_grid(sample.ratio.test.val~sample.ratio.ref.val, scales="free") + xlab("Distance to centroid (original)") + ylab("Distance to centroid (random trial, rescaled)")
+#+ geom_abline(intercept=0, slope=1, linetype="dashed") 
+
+print(plot.trials.scatter.full )
+
+tpdf(path=config$plotpath, paste0("simulations_scatter.pdf") %>% addversion, wi=12, he=10)
+print(plot.trials.scatter.full )
+dev.off()
+
+```
+
+
+```{r, fig.width=18, fig.height=7}
+pdata <- full.pca.trials.data[ (sample.ratio.ref==sample.steps.ref[1] & sample.ratio.test==sample.steps.test[1]) | (sample.ratio.ref==sample.steps.ref[round(length(sample.steps.ref)/2)] & sample.ratio.test==sample.steps.test[round(length(sample.steps.test)/2)]) | (sample.ratio.ref==length(sample.steps.ref) & sample.ratio.test==sample.steps.test[length(sample.steps.test)]) , ]
+
+plot.trials.scatter.small <- ggplot(pdata, aes(x=dist.to.centroid.pca, y=dist.to.centroid.trial.rescaled)) + ggrastr::geom_point_rast(aes(color=treatment.round)) + theme_bw() + facet_wrap(gsub("\\n"," ",sample.ratio.test.val)~gsub("\\n"," ",sample.ratio.ref.val), scales="free", ncol=3) + xlab("Distance to centroid (original)") + ylab("Distance to centroid (random trial, rescaled)") + theme(legend.position="bottom")
+#+ geom_abline(intercept=0, slope=1, linetype="dashed") 
+#+ 
+
+print(plot.trials.scatter.small)
+```
+
+
+```{r}
+cor.table <- full.pca.trials.data[, .(r_pearson = cor(dist.to.centroid.pca, dist.to.centroid.trial), r_spearman = cor(dist.to.centroid.pca, dist.to.centroid.trial, method="spearman")), by=.(sample.ratio.ref.val, sample.ratio.test.val, sample.ratio.ref.val.short, sample.ratio.test.val.short, trial.iteration)]
+
+for(i in 1:min(n.trials,12)) {
+  m <- as.data.frame(dcast(cor.table[trial.iteration==i, ], sample.ratio.ref.val~sample.ratio.test.val, value.var="r_pearson"))
+  rownames(m) <- as.character(m[,1])
+  m <- as.matrix(m[,-1])
+  
+  matrix(prettyNum(m, digits=3), nrow=nrow(m))
+  
+  print(pheatmap(m, display_numbers = TRUE, number_color = "black", number_format = "%.2f", cellwidth = 20, cellheight = 20, cluster_rows = FALSE, cluster_cols = FALSE, name="r_pearson"))
+}
+
+#cor.table.simple <- full.pca.trials.data[, .(r = cor(dist.to.centroid.pca, dist.to.centroid.trial)), by=.(sample.ratio.ref.val, sample.ratio.test.val, sample.ratio.ref.val.short, sample.ratio.test.val.short)]
+cor.table.simple <- cor.table[,.(mean_pearson = mean(r_pearson), median_pearson = median(r_pearson), mean_spearman = mean(r_spearman), sd_spearman = sd(r_spearman), median_spearman = median(r_spearman)), by=.(sample.ratio.ref.val, sample.ratio.test.val, sample.ratio.ref.val.short, sample.ratio.test.val.short)]
+
+for(val.var in c("mean_pearson", "median_pearson", "mean_spearman", "median_spearman")) {
+  m <- as.data.frame(dcast(cor.table.simple, sample.ratio.ref.val~sample.ratio.test.val, value.var=val.var))
+  rownames(m) <- as.character(m[,1])
+  m <- as.matrix(m[,-1])
+  
+  print(pheatmap(m, display_numbers = TRUE, number_color = "black", number_format = "%.2f", cellwidth = 20, cellheight = 20, cluster_rows = FALSE, cluster_cols = FALSE, name=val.var, main=sprintf("%s, n = %d trials", val.var, n.trials)))
+}
+```
+
+```{r}
+val.var <- "mean_spearman"
+m <- as.data.frame(dcast(cor.table.simple, sample.ratio.test.val.short~sample.ratio.ref.val.short, value.var=val.var))
+rownames(m) <- as.character(m[,1])
+m <- as.matrix(m[nrow(m):1,-1])
+hm1 <- (ComplexHeatmap::pheatmap(m, display_numbers = TRUE, number_color = "black", number_format = "%.2f", cellwidth = 20, cellheight = 20, cluster_rows = FALSE, cluster_cols = FALSE, name=val.var, main=sprintf("%s, n = %d trials", val.var, n.trials)))
+
+val.var <- "sd_spearman"
+m <- as.data.frame(dcast(cor.table.simple, sample.ratio.test.val.short~sample.ratio.ref.val.short, value.var=val.var))
+rownames(m) <- as.character(m[,1])
+m <- as.matrix(m[nrow(m):1,-1])
+hm2 <- (ComplexHeatmap::pheatmap(m, display_numbers = TRUE, number_color = "black", number_format = "%.2f", cellwidth = 20, cellheight = 20, cluster_rows = FALSE, cluster_cols = FALSE, name=val.var, main=sprintf("%s, n = %d trials", val.var, n.trials)))
+
+ComplexHeatmap::draw(hm1 + hm2)
+```
+
+```{r}
+
+melt.data.table(cor.table.simple, measure.vars=c("mean_spearman", "sd_spearman"))
+
+plot.cor.hms <- ggplot(melt.data.table(cor.table.simple, measure.vars=c("mean_spearman", "sd_spearman")), aes(x=sample.ratio.ref.val.short, y=sample.ratio.test.val.short, fill=value)) + geom_tile() + scale_fill_gradientn(colors=colorRampPalette(rev(RColorBrewer::brewer.pal(n = 7, name = "RdYlBu")))(100)) + xlab("Reference dataset") + ylab("Test dataset") + cowplot::theme_minimal_grid() + geom_text(aes(label=sprintf("%.2f", value))) + facet_wrap(~variable) + theme(legend.position="bottom")# + ggtitle("Correlation: Erythroid distance\nin full vs. sampled dataset") 
+
+print(plot.cor.hms)
+
+```
+
+```{r, fig.width=8, fig.height=5}
+plot.cor.bubbles <- ggplot(cor.table[, .(mean_r=mean(r_spearman), sd_r=sd(r_spearman)), by=.(sample.ratio.ref.val.short, sample.ratio.test.val.short)], aes(x=sample.ratio.ref.val.short, y=sample.ratio.test.val.short, fill=mean_r, size=1-sd_r)) + geom_point(shape=21, alpha=0.5) + scale_fill_gradient2(name="mean(r)") + xlab("Reference dataset") + ylab("Test dataset") + scale_size_binned(range=c(0.1,10)) + theme_bw() + geom_text(aes(label=sprintf("%.2f", mean_r)), size=3) # + ggtitle("Correlation: Erythroid distance\nin full vs. sampled dataset") 
+
+print(plot.cor.bubbles)
+```
+
+```{r, fig.width=18, fig.height=7}
+#print(wrap_plots(plot.trials.scatter.small, plot.cor.bubbles, widths=c(3,1)))
+print(wrap_plots(plot.trials.scatter.small, plot.cor.hms, widths=c(3,1)))
+```
+
+
+```{r}
+#full.pca.trials.data[, .(mean.dist.per.trial = mean(dist.to.centroid.trial)), by=.(trial.iteration, treatment.round, treatment.label, sample.ratio.ref.val, sample.ratio.test.val, sample.ratio.ref.val.short, sample.ratio.test.val.short)]
+
+
+#pdata1 <- full.pca.trials.data[, .(mean.dist.per.trial = mean(dist.to.centroid.trial)), by=.(trial.iteration, treatment.round, treatment.label, sample.ratio.ref.val, sample.ratio.test.val, sample.ratio.ref.val.short, sample.ratio.test.val.short)][order(mean.dist.per.trial), head(.SD, 1)[,.(winner = treatment.label, mean.dist.per.trial)], by=.(trial.iteration, treatment.round, sample.ratio.ref.val, sample.ratio.test.val, sample.ratio.ref.val.short, sample.ratio.test.val.short)]
+
+full.pca.trials.data[, margin.per.trial := abs(dist.to.centroid.trial - mean(dist.to.centroid.trial)), by=.(trial.iteration, treatment.round, treatment.label, sample.ratio.ref.val, sample.ratio.test.val)]
+
+
+
+# best sample per trial:
+pdata1 <- full.pca.trials.data[order(dist.to.centroid.trial), head(.SD, 1)[,.(winner = treatment.label, mean.dist.per.trial=dist.to.centroid.trial, margin.per.trial)], by=.(trial.iteration, treatment.round, sample.ratio.ref.val, sample.ratio.test.val, sample.ratio.ref.val.short, sample.ratio.test.val.short)]
+
+
+
+
+
+pdata2 <- pdata1[, .N, by=.(winner, treatment.round, sample.ratio.ref.val, sample.ratio.test.val, sample.ratio.ref.val.short, sample.ratio.test.val.short)]
+
+# Pie chart
+#ggplot(pdata2, aes(x = treatment.round, y = N, fill = winner)) +
+#  geom_bar(stat = "identity", width = 1) +
+#  coord_polar(theta = "y") +
+#  theme_void() +
+#  facet_grid(sample.ratio.ref.val ~ sample.ratio.test.val)
+#
+treatments.round2 <- c("A","B","C","D","E","F","G","H")
+
+best.treat = 5
+second.treat = 7
+
+treatment.cols <- c(
+  best = "red",
+  second = "blue",
+  structure(RColorBrewer::brewer.pal(length(treatments.round2)+1,"Reds")[-1], names=paste0(best.treat, treatments.round2)),
+  structure(RColorBrewer::brewer.pal(length(treatments.round2)+1,"Blues")[-1], names=paste0(second.treat, treatments.round2))
+)
+names(treatment.cols)[1:2] <- c(best.treat, second.treat)
+x <- setdiff(sort(pdata1[,unique(winner)]), names(treatment.cols))
+treatment.cols <- c(treatment.cols, structure(grey.colors(length(x)), names=x))
+```
+
+```{r}
+plot.winners.margin <- ggplot(pdata1, aes(x=sample.ratio.test.val.short, y=margin.per.trial, color=sample.ratio.ref.val.short)) + geom_boxplot(position="dodge") + theme_bw() + xlab("Test dataset") + ylab("Margin erythroid distance: winner vs. mean") + theme(legend.position="bottom")
+print(plot.winners.margin)
+```
+
+```{r, fig.width=12, fig.height=5}
+plot.winners.1 <- ggplot(pdata1, aes(x = trial.iteration, y=sample.ratio.test.val.short, color=winner)) + geom_point() + theme_minimal() + facet_grid(factor(sample.ratio.ref.val, levels = rev(sample.steps.fac.ref))~treatment.round, scales="free_y") + ylab("Test dataset") + xlab("Trial iteration") + scale_color_manual(values=treatment.cols, guide = guide_none())
+print(plot.winners.1)
+```
+
+```{r, fig.width=12, fig.height=5}
+plot.winners.2 <- ggplot(pdata2, aes(x = sample.ratio.test.val.short, y=N, fill=winner)) + geom_bar(stat="identity", position="fill") + theme_minimal() + facet_grid(factor(sample.ratio.ref.val, levels = rev(sample.steps.fac.ref))~treatment.round, scales="free") + xlab("Test dataset") + ylab("Fraction of trials") + scale_fill_manual(values=treatment.cols, guide=guide_legend(ncol=3, title = NULL)) #+ theme(legend.position="bottom")
+print(plot.winners.2)
+```
+
+
+```{r, fig.width=18, fig.height=12}
+p <- wrap_plots(wrap_plots(plot.trials.scatter.small, plot.cor.hms, plot.winners.margin, widths=c(2,1,1)), wrap_plots(plot.winners.1, plot.winners.2, widths=c(2,1)), heights=c(2,3)) + plot_annotation(tag_levels = 'A')
+print(p)
+
+tpdf(path=config$plotpath, "simulations_compiled" %>% addversion, wi=16, he=8)
+print(p)
+dev.off()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+
+```

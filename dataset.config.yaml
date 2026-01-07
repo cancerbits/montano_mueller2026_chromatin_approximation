@@ -1,0 +1,9 @@
+dataset_name: Corces2016,Seruggia2024-1,Seruggia2024-2,Ludwig2019,Seruggia2025-3,Ramirez2017,Zimmermannova2023,Li2020
+dataset_paths_nfcore: ~/mnt_out/atacseq_corces2016_reference_broadpeak/,~/mnt_out/seruggia2024-1_atac_biodirt_yespeak/,~/mnt_out/atacseq_seruggia20242_bob_try2/,~/mnt_out/atacseq_ludwig2019/,~/mnt_out/atacseq_seruggia2025_03_biodirt_broadpeak/,~/mnt_out/atacseq_ramirez2017_run2/,~/mnt_out/atacseq_zimmermannova2023/,~/mnt_out/atacseq_li2020/
+dataset_paths_metadata: ~/ml2cell_code/metadata/metadata_srarunselector_corces_annotated.csv,~/ml2cell_code/metadata/samplesheet2024-1_annotation_treatment.csv,~/ml2cell_code/metadata/samplesheet_seruggia_2024_2_conditions_annotated.csv,~/ml2cell_code/metadata/metadata_ludwig2019.csv,~/ml2cell_code/metadata/samplesheet_seruggia_2025_03_annotated.csv,~/mnt_out/fetchngs_ramirez2017/samplesheet/samplesheet_atacseq_external.csv,~/mnt_out/fetchngs_zimmermannova2023/samplesheet/samplesheet_atacseq_external.csv,~/mnt_out/CRAdata_li2020/samplesheet_atacseq_external.csv
+dataset_paths_counts_ref: NA,NA,NA,NA,NA,NA,NA,NA
+dataset_paths_counts_self: NA,NA,NA,NA,NA,NA,NA,NA
+dataset_type: reference,test,test,external,test,external,external,external
+frip_threshold: 0.05,0.05,0.05,0.05,0.05,0.05,0.05,0.05
+cell_group_vars: celltype,condition,condition,Population,treatment,sample,condition,sample
+metadata_sample_name_col: Experiment,Experiment,Experiment,Experiment,Experiment,sample,sample,Experiment
