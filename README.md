@@ -18,7 +18,7 @@ A prime goal of regenerative medicine is to replace dysfunctional cells in the b
 
 ## Important note for potential users
 
-The code present in here was submitted for revision to Nucleic Acids Research. This means it is highly tailored for the paper's dataset and it is not immediately functional as software. A more user-friendly pipeline will be made available shortly (The link to that project will be shared exactly here). If you are interested in applying the pipeline to your code or would like updates on the user-friendly pipeline, please contact me (via github or luis.montano at meduniwien.ac.at), and I will gladly update and support you applying the analysis pipeline to your data.
+The code present in here was submitted for revision to Nucleic Acids Research. This means it is highly tailored for the paper's dataset and it is not immediately functional as software. A more user-friendly pipeline will be made available shortly (The link to that project will be shared exactly here). If you are interested in applying the pipeline to your code or would like updates on the user-friendly pipeline, please contact me (via github or luis.montanogutierrez at meduniwien.ac.at), and I will gladly update and support you applying the analysis pipeline to your data.
 
 ## Repository structure:
 
