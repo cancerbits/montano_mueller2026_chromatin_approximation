@@ -12,10 +12,13 @@ Authors: Luis F. Montano-Gutierrez<sup>1,\*</sup>, Sophie Müller<sup>1,2,\*</su
 
 <sup>\*,#</sup>, These authors contributed equally to this work.
 
-
 ## Abstract:
 
 A prime goal of regenerative medicine is to replace dysfunctional cells in the body. To design protocols for producing target cells in the laboratory, one may need to consider exponentially large combinations of culture components. Here, we tested the potential of iteratively approximating the target phenotype by quantifying the distance between chromatin profiles (ATAC-seq) of differentiating cells in vitro and their in-vivo counterparts. We tested this approach on the well-studied generation of erythroblasts from haematopoietic stem cells, evaluating a fixed number of components over two sequential differentiation rounds (8x8 protocols). We found that the most erythroblast-like cells upon the first round yielded the most erythroblast-like cells at the second round, suggesting that greedy selection by chromatin approximation can be a viable optimisation strategy. Furthermore, by targeting transcriptional regulators linked to chromatin regions that were incompletely reprogrammed even after two rounds of differentiation, we could make a data-driven selection of additions to the protocol that further improved erythropoiesis. In future, our methodology can help craft notoriously difficult cells in vitro, such as B cells.
+
+## Important note for potential users
+
+The code present in here was submitted for revision to Nucleic Acids Research. This means it is highly tailored for the paper's dataset and it is not immediately functional as software. A more user-friendly pipeline will be made available shortly (The link to that project will be shared exactly here). If you are interested in applying the pipeline to your code or would like updates on the user-friendly pipeline, please contact me (via github or luis.montano at meduniwien.ac.at), and I will gladly update and support you applying the analysis pipeline to your data.
 
 ## Repository structure:
 
@@ -30,7 +33,7 @@ A prime goal of regenerative medicine is to replace dysfunctional cells in the b
 ## Links:
 
 * Gene Expression Omnibus (GEO): [GSE291386](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE291386)
-* Preprint (bioRxiv): [doi:10.1101/2025.04.24.650451][https://doi.org/10.1101/2025.04.24.650451]
+* Publication: [DOI](https://doi.org/10.1093/nar/gkag124)
 
 # ML2Cell
 
